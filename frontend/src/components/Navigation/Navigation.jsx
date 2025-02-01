@@ -1,80 +1,53 @@
-import style from "./Navigation.module.css";
-import { Link, useLocation } from "react-router-dom";
-import classNames from "classnames";
+import React from "react";
+import { Link } from "react-router-dom";
+import { FaUserCircle } from "react-icons/fa"; // For the account icon
+import styles from "./Navigation.module.css"; // Your existing CSS
 
-function Navigation() {
-  const location = useLocation();
-
-  // Check active link function
-  const isActive = (path) => location.pathname === path;
+const Navigation = ({ isAuthenticated, setIsAuthenticated }) => {
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem("hasLoggedInBefore");
+  };
 
   return (
-    <>
-      <nav className={classNames(style.navigation, style.container)}>
-        <Link to="/">
-          <div className={style.logo}>
+    <div className={styles.navigation}>
+      {/* Logo */}
+      <div className={styles.logo}>
+      <Link to="/">
+          <div className={styles.logo}>
             <img src="/images/LasLogo.png" alt="logo" />
           </div>
         </Link>
-        <div className={style.navBar}>
-          <ul>
-            <li>
-              <Link
-                className={classNames(style.this_page, {
-                  [style.active]: isActive("/"),
-                })}
-                to="/"
-              >
-                Home
-              </Link>
-            </li>
-            <li>
-              <Link
-                className={classNames(style.this_page, {
-                  [style.active]: isActive("/aboutUs"),
-                })}
-                to="/aboutUs"
-              >
-                About Us
-              </Link>
-            </li>
-            <li>
-              <Link
-                className={classNames(style.this_page, {
-                  [style.active]: isActive("/contactUs"),
-                })}
-                to="/contactUs"
-              >
-                Contact Us
-              </Link>
-            </li>
-          </ul>
-        </div>
-        <div className={style.button}>
-          <button className={style.login}>
-            <Link
-              className={classNames(style.loginPage, {
-                [style.active]: isActive("/login"),
-              })}
-              to="/login"
-            >
-              Login
-            </Link>
-          </button>
-          <button className={style.signup}>
-            <Link
-              className={classNames(style.loginPage, {
-                [style.active]: isActive("/register"),
-              })}
-              to="/register"
-            >
-              Sign Up
-            </Link>
-          </button>
-        </div>
-      </nav>
-    </>
+      </div>
+
+      {/* Navigation Links */}
+      <ul>
+        <li><Link to="/" className={styles.this_page}>Home</Link></li>
+        <li><Link to="/aboutUs" className={styles.this_page}>About Us</Link></li>
+        {/* <li><Link to="/recipe" className={styles.this_page}>Recipe</Link></li> */}
+        <li><Link to="/contactUs" className={styles.this_page}>Contact Us</Link></li>
+      </ul>
+
+      {/* Conditional Auth Section */}
+      <div className={styles.button}>
+        {isAuthenticated ? (
+          <div className={styles.accountIcon}>
+            <FaUserCircle 
+              size={32} 
+              color="#572802" 
+              style={{ cursor: "pointer" }}
+              onClick={handleLogout} // Or link to profile
+            />
+          </div>
+        ) : (
+          <>
+            <Link to="/login" className={styles.login}>Login</Link>
+            <Link to="/register" className={styles.signup}>Sign Up</Link>
+          </>
+        )}
+      </div>
+    </div>
   );
-}
+};
 
 export default Navigation;

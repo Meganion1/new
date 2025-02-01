@@ -1,131 +1,129 @@
 import base64
 import os
-from io import BytesIO
-from PIL import Image
-import pandas as pd
-from django.http import JsonResponse
 import math
 import re
+import numpy as np
+import collections
+import pandas as pd
+from io import BytesIO
+from PIL import Image
+from django.http import JsonResponse
 
 # Define file paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 csv_path = os.path.join(BASE_DIR, 'Dataset.csv')
-images_folder = os.path.join(BASE_DIR, 'images')  
+images_folder = os.path.join(BASE_DIR, 'images')
 
 # Load and preprocess the dataset
 dataset = pd.read_csv(csv_path)
 dataset['Cleaned_Ingredients'] = dataset['Cleaned_Ingredients'].astype(str)
 
-# Tokenization function
 def tokenize(text):
     """Split text into tokens."""
-    tokens = re.findall(r'\b\w+\b', text.lower())  # Extract words ignoring case
-    return tokens
+    return re.findall(r'\b\w+\b', text.lower())
 
-# Preprocess dataset by tokenizing ingredients
 dataset['Tokenized_Ingredients'] = dataset['Cleaned_Ingredients'].apply(tokenize)
 
-# TF-IDF calculation functions
 def calculate_tf(tokens):
-    """Calculate term frequency for a list of tokens."""
-    tf = {}
+    """Efficient Term Frequency using Counter."""
     total_tokens = len(tokens)
-    for token in tokens:
-        tf[token] = tf.get(token, 0) + 1
-    for token in tf:
-        tf[token] /= total_tokens
-    return tf
+    token_counts = collections.Counter(tokens)
+    return {token: count / total_tokens for token, count in token_counts.items()} if total_tokens > 0 else {}
 
 def calculate_idf(all_tokens):
-    """Calculate inverse document frequency for all terms."""
-    idf = {}
+    """Efficient IDF Calculation - Single Pass."""
     total_docs = len(all_tokens)
-    for tokens in all_tokens:
-        unique_tokens = set(tokens)
-        for token in unique_tokens:
-            idf[token] = idf.get(token, 0) + 1
-    for token in idf:
-        idf[token] = math.log(total_docs / (1 + idf[token]))  # Add 1 to avoid division by zero
-    return idf
+    doc_count = collections.Counter(token for tokens in all_tokens for token in set(tokens))
+    return {token: math.log(total_docs / (count + 1)) for token, count in doc_count.items()}  # Avoid division by zero
 
-def calculate_tf_idf(tokenized_documents):
-    """Calculate the TF-IDF matrix for tokenized documents."""
-    tf_idf_matrix = []
-    idf = calculate_idf(tokenized_documents)
-    for tokens in tokenized_documents:
-        tf = calculate_tf(tokens)
-        tf_idf = {token: tf[token] * idf[token] for token in tf}
-        tf_idf_matrix.append(tf_idf)
-    return tf_idf_matrix, idf
+idf = calculate_idf(dataset['Tokenized_Ingredients'].tolist())
+tf_idf_matrix = [{token: tf * idf[token] for token, tf in calculate_tf(tokens).items()} for tokens in dataset['Tokenized_Ingredients']]
 
-def vectorize(tf_idf, idf, vocabulary):
-    """Convert a TF-IDF dictionary to a vector."""
-    vector = [tf_idf.get(token, 0) for token in vocabulary]
+vocabulary = sorted(set(token for tf_idf in tf_idf_matrix for token in tf_idf))
+vocab_index = {token: i for i, token in enumerate(vocabulary)}
+
+def vectorize(tf_idf):
+    """Convert a TF-IDF dictionary to a fixed-length NumPy array."""
+    vector = np.zeros(len(vocabulary), dtype=np.float32)
+    for token, value in tf_idf.items():
+        if token in vocab_index:
+            vector[vocab_index[token]] = value
     return vector
 
-def get_image_base64(image_path):
+tf_idf_vectors = np.array([vectorize(tf_idf) for tf_idf in tf_idf_matrix], dtype=np.float32)
+
+def get_image_base64(image_name):
     """Convert image to base64-encoded string."""
     try:
+        image_path = os.path.join(images_folder, f"{image_name}.jpg")
         image = Image.open(image_path)
         buffered = BytesIO()
         image.save(buffered, format="JPEG")
-        img_str = base64.b64encode(buffered.getvalue()).decode("utf-8")
-        return img_str
+        return base64.b64encode(buffered.getvalue()).decode("utf-8")
     except Exception:
         return None
 
 def pearson_correlation(vec1, vec2):
-    """Calculate Pearson's correlation coefficient."""
-    n = len(vec1)
-    sum1 = sum(vec1)
-    sum2 = sum(vec2)
-    sum1_sq = sum(v ** 2 for v in vec1)
-    sum2_sq = sum(v ** 2 for v in vec2)
-    p_sum = sum(v1 * v2 for v1, v2 in zip(vec1, vec2))
-    num = p_sum - (sum1 * sum2 / n)
-    den = ((sum1_sq - sum1**2 / n) * (sum2_sq - sum2**2 / n))**0.5
-    return num / den if den != 0 else 0
+    """Compute Pearson correlation using NumPy (Vectorized)."""
+    mean1, mean2 = np.mean(vec1), np.mean(vec2)
+    num = np.sum((vec1 - mean1) * (vec2 - mean2))
+    den = np.sqrt(np.sum((vec1 - mean1) ** 2) * np.sum((vec2 - mean2) ** 2))
+    return float(num / den) if den != 0 else 0  # Convert to Python float
 
-# Calculate the TF-IDF matrix for the dataset
-tokenized_documents = dataset['Tokenized_Ingredients'].tolist()
-tf_idf_matrix, idf = calculate_tf_idf(tokenized_documents)
-
-# Create a vocabulary from all tokenized documents
-vocabulary = set(token for tf_idf in tf_idf_matrix for token in tf_idf)
-
-# Convert dataset TF-IDF to vectors
-tf_idf_vectors = [vectorize(tf_idf, idf, vocabulary) for tf_idf in tf_idf_matrix]
-
-# Updated function to recommend recipes
 def recommend_recipes(request):
-    user_input = request.GET.get('ingredients', '')    
+    user_input = request.GET.get('ingredients', '').strip()
     if not user_input:
         return JsonResponse({'error': 'No ingredients provided'}, status=400)
 
-    # Tokenize and clean user input
     user_tokens = tokenize(user_input)
     user_tf = calculate_tf(user_tokens)
     user_tf_idf = {token: user_tf.get(token, 0) * idf.get(token, 0) for token in user_tf}
-    user_vector = vectorize(user_tf_idf, idf, vocabulary)
+    user_vector = vectorize(user_tf_idf)
 
-    # Calculate Pearson correlation between user input and the dataset
-    similarities = [
-        pearson_correlation(user_vector, recipe_vector) for recipe_vector in tf_idf_vectors
+    similarities = np.array([pearson_correlation(user_vector, recipe_vector) for recipe_vector in tf_idf_vectors])
+    top_indices = similarities.argsort()[-5:][::-1]
+
+    recommendations = [
+        {
+            'title': dataset.iloc[idx]['Title'],
+            'ingredients': dataset.iloc[idx]['Ingredients'],
+            'instructions': dataset.iloc[idx]['Instructions'],
+            'similarity_score': float(similarities[idx]),  # Convert to Python float
+            'image_base64': get_image_base64(dataset.iloc[idx]['Image_Name'])
+        }
+        for idx in top_indices
     ]
-    top_indices = sorted(range(len(similarities)), key=lambda i: similarities[i], reverse=True)[:5]
 
-    # Preparing the recommendations
-    recommendations = []
-    for idx in top_indices:
-        recipe = dataset.iloc[idx]
-        image_path = os.path.join(images_folder, f"{recipe['Image_Name']}.jpg") 
-        image_base64 = get_image_base64(image_path)
-        recommendations.append({
-            'title': recipe['Title'],
-            'ingredients': recipe['Ingredients'],
-            'instructions': recipe['Instructions'],
-            'similarity_score': similarities[idx],
-            'image_base64': image_base64
-        })
+    return JsonResponse({'recommendations': recommendations})
+
+def recommend_more_recipes(request):
+    recipe_name = request.GET.get('recipe_name', '').strip()
+
+    if not recipe_name:
+        return JsonResponse({'error': 'No recipe name provided'}, status=400)
+
+    recipe_row = dataset[dataset['Title'].str.lower() == recipe_name.lower()]
+    if recipe_row.empty:
+        return JsonResponse({'error': 'Recipe not found'}, status=404)
+
+    clicked_recipe_index = recipe_row.index[0]
+    clicked_recipe_vector = tf_idf_vectors[clicked_recipe_index]
+
+    similarities = np.array([pearson_correlation(clicked_recipe_vector, recipe_vector) for recipe_vector in tf_idf_vectors])
+    top_indices = similarities.argsort()[-6:][::-1]  # Get top 6 (including itself)
+
+    # Exclude the clicked recipe from recommendations
+    top_indices = [idx for idx in top_indices if idx != clicked_recipe_index][:5]
+
+    recommendations = [
+        {
+            'title': dataset.iloc[idx]['Title'],
+            'ingredients': dataset.iloc[idx]['Ingredients'],
+            'instructions': dataset.iloc[idx]['Instructions'],
+            'similarity_score': float(similarities[idx]),  # Convert to Python float
+            'image_base64': get_image_base64(dataset.iloc[idx]['Image_Name'])
+        }
+        for idx in top_indices
+    ]
 
     return JsonResponse({'recommendations': recommendations})

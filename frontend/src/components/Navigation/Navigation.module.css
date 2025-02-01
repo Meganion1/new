@@ -1,3 +1,20 @@
+
+/* Add these to your existing CSS */
+.accountIcon {
+    display: flex;
+    align-items: center;
+    padding: 4px;
+    transition: all 0.3s ease;
+  }
+  
+  .accountIcon:hover {
+    opacity: 0.8;
+    cursor: pointer;
+    transform: scale(1.05);
+  }
+  
+  /* Keep all your existing CSS below */
+  
 .container {
     display: flex;
     margin: 0 2rem;
@@ -93,3 +110,4 @@ hr {
     color: #7d0101;
     margin: 0 2rem;
 }
+
